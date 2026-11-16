@@ -24,6 +24,19 @@
 
 **GiTorch** automatically provisions a clean, isolated Docker container for every GitHub Actions job and destroys it as soon as the job finishes. No leftover host state, no manual runner restarts, and no cross-build contamination.
 
+> **All the power of ephemeral runners, profiles, and DinD isolation — without the Kubernetes complexity or overhead.**
+
+## Why GiTorch instead of GitHub ARC?
+
+| | GiTorch | GitHub Actions Runner Controller (ARC) |
+| :--- | :--- | :--- |
+| **Infrastructure** | Single Docker host (`docker compose up -d`) | Full Kubernetes cluster + Helm + cert-manager |
+| **Setup time** | ~2 minutes | Hours of cluster & CRD configuration |
+| **DinD isolation** | Built-in per-job DinD sidecar toggle | Requires Kubernetes pod/dind template tuning |
+| **Web UI & live logs** | Built-in real-time dashboard + log streaming | None out of the box (requires kubectl / external tools) |
+| **Multi-node & HA** | Optional Docker node pool + PostgreSQL/Redis HA | Tied to Kubernetes scheduling |
+| **Resource footprint** | Lightweight single container (~50–80 MB RAM) | Control-plane pods + k8s system overhead |
+
 ## Key Features
 
 - **Event-driven ephemeral runners** — spins up a single-use container on incoming GitHub Actions job events and removes it automatically upon completion or cancellation.
@@ -71,6 +84,19 @@ Open the dashboard at `http://localhost:8080`, sign in with your configured cred
 ```yaml
 runs-on: [self-hosted, linux, x64]
 ```
+
+### 3. No public IP or domain? Expose locally in 10 seconds (Optional)
+
+You don't need a VPS, domain, or SSL certificate to test GiTorch locally. Expose port `8080` over HTTPS with a one-liner and paste the generated `<tunnel-url>/webhook` into your GitHub App settings:
+
+- **Cloudflare Tunnel (no account required):**
+  ```bash
+  cloudflared tunnel --url http://localhost:8080
+  ```
+- **ngrok:**
+  ```bash
+  ngrok http 8080
+  ```
 
 > For step-by-step GitHub App setup and first-run instructions, see the [Getting Started Guide](docs/getting-started.md).
 

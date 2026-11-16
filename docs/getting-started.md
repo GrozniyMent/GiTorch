@@ -77,6 +77,18 @@ Expected response:
 
 Open `http://localhost:8080` in your browser and sign in with the username and password from `.env`.
 
+### Optional: Testing locally without a public IP or domain
+
+If you are running GiTorch on your local machine without a public IP, domain, or reverse proxy, expose `localhost:8080` over HTTPS in one command and set the resulting `<tunnel-url>/webhook` as your GitHub App Webhook URL:
+
+```bash
+# Using Cloudflare Tunnel (no account required)
+cloudflared tunnel --url http://localhost:8080
+
+# Or using ngrok
+ngrok http 8080
+```
+
 ## 4. Run a Test Workflow
 
 Add `.github/workflows/ci.yml` to one of your connected repositories:
