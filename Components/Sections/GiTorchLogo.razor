@@ -1,0 +1,10 @@
+@namespace RunnerOrchestrator.Components.Sections
+@using RunnerOrchestrator.Components.Support
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="@Class" aria-hidden="true">
+    @((MarkupString)DashboardFormatting.LogoInnerSvg)
+</svg>
+
+@code {
+    [Parameter] public string Class { get; set; } = "h-9 w-9 shrink-0";
+}

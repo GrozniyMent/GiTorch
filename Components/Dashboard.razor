@@ -1,0 +1,329 @@
+@page "/"
+@namespace RunnerOrchestrator.Components
+@using System.Globalization
+@using gitorch.Configuration
+@using gitorch.Models
+@using gitorch.Services
+@using gitorch.Services.Abstractions
+@using gitorch.Services.Docker
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.JSInterop
+@using RunnerOrchestrator.Components.Sections
+@using RunnerOrchestrator.Components.Support
+@implements IDisposable
+@inject OrchestratorState State
+@inject RunnerWorker Worker
+@inject IRunnerImageService ImageService
+@inject OrchestratorConfig Config
+@inject OrchestratorMetrics Metrics
+@inject IDockerNodePool NodePool
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>GiTorch - @ActiveSlotsCount active / @QueuedCount queued</PageTitle>
+
+<div class="aura pointer-events-none fixed inset-x-0 top-0 h-48" aria-hidden="true"></div>
+
+<a href="#main-content"
+   class="sr-only focus:not-sr-only fixed left-2 top-2 z-50 rounded-md border border-orange-500/40 bg-white dark:bg-[#0c0c0e] px-2.5 py-1 font-mono text-xs text-orange-600 dark:text-orange-300">
+    Skip to content
+</a>
+
+<DashboardHeader RunnerImage="@Config.RunnerImage"
+                 ImageStatus="@State.ImageStatus"
+                 IsPulling="@_isPulling"
+                 AuthEnabled="@(!string.IsNullOrEmpty(Config.DashboardPassword))"
+                 ThemeMode="@_themeMode"
+                 OnPullImage="TriggerPullAsync"
+                 OnCycleTheme="CycleThemeAsync" />
+
+<main id="main-content" tabindex="-1" class="relative mx-auto max-w-[1440px] space-y-5 px-5 py-6 sm:px-8 focus:outline-none">
+    <ClusterMetricsStrip ActiveSlotsCount="@ActiveSlotsCount"
+                         MaxConcurrentRunners="@Config.MaxConcurrentRunners"
+                         AvailableSlots="@Worker.AvailableSlots"
+                         QueuedCount="@QueuedCount"
+                         RequiredLabel="@Config.RequiredLabel"
+                         AverageSlotWaitSeconds="@Metrics.AverageSlotWaitSeconds"
+                         AverageJobDurationSeconds="@Metrics.AverageJobDurationSeconds"
+                         CpuLimitCores="@Config.CpuLimitCores"
+                         MemoryLimitMb="@Config.MemoryLimitMb"
+                         GitHubApiErrors="@Metrics.GitHubApiErrors"
+                         TotalSessions="@Sessions.Count" />
+
+    <RunnerPoolBar Nodes="@NodeStatuses"
+                   Profiles="@Config.Profiles"
+                   MaxConcurrentRunners="@Config.MaxConcurrentRunners" />
+
+    <SessionsTable Tabs="@StatusTabs"
+                   FilteredSessions="@FilteredSessions"
+                   TotalSessionCount="@Sessions.Count"
+                   StatusFilter="@_statusFilter"
+                   SearchQuery="@_searchQuery"
+                   RequiredLabel="@Config.RequiredLabel"
+                   AverageJobDurationSeconds="@Metrics.AverageJobDurationSeconds"
+                   DefaultCpuLimitCores="@Config.CpuLimitCores"
+                   DefaultMemoryLimitMb="@Config.MemoryLimitMb"
+                   SelectedJobId="@_selectedSession?.JobId"
+                   ConfirmingJobId="@_confirmingJobId"
+                   OnStatusFilterChanged="SetStatusFilter"
+                   OnSearchQueryChanged="SetSearchQuery"
+                   OnResetFilters="ResetFilters"
+                   OnOpenLogs="OpenLogsAsync"
+                   OnRequestConfirmation="RequestConfirmationAsync"
+                   OnCancelConfirmation="CancelConfirmation"
+                   OnConfirmTerminate="ExecuteTerminateAsync" />
+</main>
+
+<LogDrawer Session="@_selectedSession"
+           DefaultCpuLimitCores="@Config.CpuLimitCores"
+           DefaultMemoryLimitMb="@Config.MemoryLimitMb"
+           OnClose="CloseLogsAsync"
+           OnNotify="HandleToastNotification" />
+
+<ToastStack Toasts="@_toasts" OnDismiss="DismissToast" />
+
+@code {
+    private IReadOnlyList<RunnerSession> Sessions => State.GetSessions();
+    private IReadOnlyList<DockerNodeStatus> NodeStatuses => NodePool.GetNodeStatuses();
+
+    private int ActiveSlotsCount => Config.MaxConcurrentRunners - Worker.AvailableSlots;
+    private int QueuedCount => Sessions.Count(x => x.Status is RunnerStatus.Queued or RunnerStatus.Provisioning);
+
+    private string _themeMode = "system";
+    private string _statusFilter = "ALL";
+    private string _searchQuery = "";
+    private bool _isPulling;
+    private long? _confirmingJobId;
+    private RunnerSession? _selectedSession;
+    private long? _lastOpenedLogId;
+
+    private readonly List<ToastMessage> _toasts = [];
+    private Timer? _uiTimer;
+
+    private IReadOnlyList<StatusTab> StatusTabs =>
+    [
+        new("ALL", "All", Sessions.Count),
+        new("ACTIVE", "Active", Sessions.Count(s => DashboardFormatting.IsActiveStatus(s.Status))),
+        new("COMPLETED", "Completed", Sessions.Count(s => s.Status == RunnerStatus.Completed)),
+        new("FAILED", "Failed", Sessions.Count(s => s.Status == RunnerStatus.Failed)),
+        new("CANCELLED", "Cancelled", Sessions.Count(s => s.Status is RunnerStatus.Cancelled or RunnerStatus.Killed))
+    ];
+
+    private List<RunnerSession> FilteredSessions => Sessions
+        .Where(s => _statusFilter switch
+        {
+            "ACTIVE" => DashboardFormatting.IsActiveStatus(s.Status),
+            "COMPLETED" => s.Status == RunnerStatus.Completed,
+            "FAILED" => s.Status == RunnerStatus.Failed,
+            "CANCELLED" => s.Status is RunnerStatus.Cancelled or RunnerStatus.Killed,
+            _ => true
+        })
+        .Where(MatchesSearch)
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.OnChange += RefreshUi;
+        Nav.LocationChanged += OnLocationChanged;
+
+        _uiTimer = new Timer(_ => InvokeAsync(StateHasChanged), null, 1000, 1000);
+        await SyncStateFromUrlAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _themeMode = await JS.InvokeAsync<string>("gitorchUi.getThemePreference");
+            StateHasChanged();
+        }
+    }
+
+    private async Task CycleThemeAsync()
+    {
+        var next = _themeMode switch
+        {
+            "system" => "light",
+            "light" => "dark",
+            _ => "system"
+        };
+        _themeMode = await JS.InvokeAsync<string>("gitorchUi.setThemePreference", next);
+    }
+
+    private void RefreshUi() => InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        _ = InvokeAsync(SyncStateFromUrlAsync);
+
+    private Task SyncStateFromUrlAsync()
+    {
+        var query = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+
+        var status = query.TryGetValue("status", out var sVal) ? sVal.ToString().ToUpperInvariant() : "ALL";
+        _statusFilter = status is "ACTIVE" or "COMPLETED" or "FAILED" or "CANCELLED" ? status : "ALL";
+        _searchQuery = query.TryGetValue("q", out var qVal) ? qVal.ToString() : "";
+
+        if (query.TryGetValue("log", out var logVal) && long.TryParse(logVal.ToString(), out var logJobId))
+        {
+            if (_selectedSession?.JobId != logJobId &&
+                State.TryGetSession(logJobId, out var session) &&
+                session?.ContainerId != null)
+            {
+                _selectedSession = session;
+                _lastOpenedLogId = session.JobId;
+            }
+        }
+        else if (_selectedSession != null)
+        {
+            _selectedSession = null;
+        }
+
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void NavigateWithState(bool replace)
+    {
+        var args = new Dictionary<string, string?>();
+        if (_statusFilter != "ALL") args["status"] = _statusFilter;
+        if (!string.IsNullOrWhiteSpace(_searchQuery)) args["q"] = _searchQuery.Trim();
+        if (_selectedSession != null) args["log"] = _selectedSession.JobId.ToString(CultureInfo.InvariantCulture);
+
+        var url = args.Count > 0 ? QueryHelpers.AddQueryString("/", args) : "/";
+        Nav.NavigateTo(url, replace: replace);
+    }
+
+    private void SetStatusFilter(string status)
+    {
+        _statusFilter = status;
+        _confirmingJobId = null;
+        NavigateWithState(replace: false);
+    }
+
+    private void SetSearchQuery(string query)
+    {
+        _searchQuery = query;
+        NavigateWithState(replace: true);
+    }
+
+    private void ResetFilters()
+    {
+        _statusFilter = "ALL";
+        _searchQuery = "";
+        NavigateWithState(replace: false);
+    }
+
+    private bool MatchesSearch(RunnerSession s)
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+            return true;
+
+        var q = _searchQuery.Trim().TrimStart('#');
+        return s.JobId.ToString(CultureInfo.InvariantCulture).Contains(q, StringComparison.OrdinalIgnoreCase)
+               || $"{s.Owner}/{s.Repo}".Contains(q, StringComparison.OrdinalIgnoreCase)
+               || s.RunnerName.Contains(q, StringComparison.OrdinalIgnoreCase)
+               || (s.ContainerId?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
+               || (s.NodeEndpoint?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
+               || s.ProfileName.Contains(q, StringComparison.OrdinalIgnoreCase)
+               || s.Labels.Any(l => l.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task TriggerPullAsync()
+    {
+        if (_isPulling)
+            return;
+
+        _isPulling = true;
+        AddToast($"Pulling {Config.RunnerImage}…", "info");
+        StateHasChanged();
+
+        try
+        {
+            await ImageService.PullImageAsync();
+            AddToast($"Image pull completed ({State.ImageStatus}).", "success");
+        }
+        catch (Exception ex)
+        {
+            AddToast($"Image pull failed: {ex.Message}", "error");
+        }
+        finally
+        {
+            _isPulling = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RequestConfirmationAsync(long jobId)
+    {
+        _confirmingJobId = jobId;
+        StateHasChanged();
+        await Task.Yield();
+        await JS.InvokeVoidAsync("gitorchUi.focusSelector", $"#btn-confirm-yes-{jobId}");
+    }
+
+    private void CancelConfirmation() => _confirmingJobId = null;
+
+    private async Task ExecuteTerminateAsync(RunnerSession session)
+    {
+        _confirmingJobId = null;
+        if (session.Status == RunnerStatus.Running && session.ContainerId != null)
+        {
+            await Worker.KillRunnerAsync(session.JobId, session.ContainerId);
+            AddToast($"Runner #{session.JobId} terminated.", "warn");
+        }
+        else
+        {
+            await Worker.CancelJobAsync(session.JobId, "Cancelled via WebUI");
+            AddToast($"Job #{session.JobId} cancelled.", "warn");
+        }
+    }
+
+    private Task OpenLogsAsync(RunnerSession session)
+    {
+        _selectedSession = session;
+        _lastOpenedLogId = session.JobId;
+        NavigateWithState(replace: false);
+        return Task.CompletedTask;
+    }
+
+    private async Task CloseLogsAsync()
+    {
+        var previousJobId = _lastOpenedLogId;
+        _selectedSession = null;
+        NavigateWithState(replace: false);
+
+        if (previousJobId != null)
+        {
+            await Task.Yield();
+            await JS.InvokeVoidAsync("gitorchUi.focusSelector", $"#btn-logs-{previousJobId}");
+        }
+    }
+
+    private void HandleToastNotification((string Message, string Kind) payload) =>
+        AddToast(payload.Message, payload.Kind);
+
+    private void AddToast(string message, string kind)
+    {
+        var id = Guid.NewGuid();
+        _toasts.Add(new ToastMessage(id, message, kind));
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(4500);
+            await InvokeAsync(() =>
+            {
+                _toasts.RemoveAll(t => t.Id == id);
+                StateHasChanged();
+            });
+        });
+    }
+
+    private void DismissToast(Guid id) => _toasts.RemoveAll(t => t.Id == id);
+
+    public void Dispose()
+    {
+        State.OnChange -= RefreshUi;
+        Nav.LocationChanged -= OnLocationChanged;
+        _uiTimer?.Dispose();
+    }
+}
