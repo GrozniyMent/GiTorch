@@ -1,0 +1,297 @@
+@namespace RunnerOrchestrator.Components.Sections
+@using System.Globalization
+@using gitorch.Models
+@using Microsoft.AspNetCore.Components.Web.Virtualization
+@using RunnerOrchestrator.Components.Support
+
+<section aria-labelledby="sessionsTitle" class="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/60 shadow-xs dark:shadow-none">
+    <div class="flex flex-col gap-3 border-b border-zinc-200 dark:border-zinc-800 px-4 py-3 md:flex-row md:items-center md:justify-between">
+        <div class="flex items-center gap-3">
+            <h2 id="sessionsTitle" class="sr-only">Runner sessions</h2>
+            <div role="tablist" aria-label="Filter by status" class="scroll-x flex gap-1.5 overflow-x-auto">
+                @foreach (var tab in Tabs)
+                {
+                    var isActive = StatusFilter == tab.Key;
+                    <button type="button"
+                            role="tab"
+                            aria-selected="@isActive"
+                            @onclick="() => OnStatusFilterChanged.InvokeAsync(tab.Key)"
+                            class="inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 font-mono text-xs transition @(isActive ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200")">
+                        @tab.Label
+                        <span class="tabular-nums @(isActive ? "text-zinc-400 dark:text-zinc-500" : "text-zinc-400 dark:text-zinc-600")">(@tab.Count)</span>
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div class="relative md:w-96">
+            <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" stroke-linecap="round" />
+            </svg>
+            <label for="session-search" class="sr-only">Filter sessions</label>
+            <input id="session-search"
+                   type="search"
+                   name="q"
+                   autocomplete="off"
+                   spellcheck="false"
+                   placeholder="Filter #id, owner/repo, runner, label…"
+                   value="@SearchQuery"
+                   @oninput="HandleSearchInput"
+                   class="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 py-2 pl-9 pr-9 font-mono text-xs text-zinc-900 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none focus:ring-2 focus:ring-orange-500/20 [&::-webkit-search-cancel-button]:hidden" />
+            @if (!string.IsNullOrEmpty(SearchQuery))
+            {
+                <button type="button"
+                        aria-label="Clear search"
+                        @onclick="() => OnSearchQueryChanged.InvokeAsync(string.Empty)"
+                        class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 dark:text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                        <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="scroll-x overflow-x-auto">
+        <table class="w-full min-w-[1024px] text-left text-sm">
+            <thead class="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 font-mono text-[11px] uppercase tracking-wider text-zinc-500">
+                <tr>
+                    <th scope="col" class="px-4 py-2.5 font-medium">Job ID</th>
+                    <th scope="col" class="px-4 py-2.5 font-medium">Target</th>
+                    <th scope="col" class="px-4 py-2.5 font-medium">Runner / Node</th>
+                    <th scope="col" class="px-4 py-2.5 font-medium">Labels</th>
+                    <th scope="col" class="px-4 py-2.5 font-medium">Status</th>
+                    <th scope="col" class="px-4 py-2.5 font-medium">Duration</th>
+                    <th scope="col" class="px-4 py-2.5 text-right font-medium">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-zinc-200/80 dark:divide-zinc-800/70">
+                @if (FilteredSessions.Count > 0)
+                {
+                    <Virtualize Items="@FilteredSessions" Context="s" ItemSize="66" OverscanCount="10">
+                        @{
+                            var isSelected = SelectedJobId == s.JobId;
+                            var isActiveJob = DashboardFormatting.IsActiveStatus(s.Status);
+                            var durPct = DashboardFormatting.GetDurationPercent(s, AverageJobDurationSeconds);
+                            var effCpu = s.CpuCores > 0 ? s.CpuCores : DefaultCpuLimitCores;
+                            var effMem = s.MemoryMb > 0 ? s.MemoryMb : DefaultMemoryLimitMb;
+                        }
+                        <tr class="group transition hover:bg-zinc-50 dark:hover:bg-zinc-900/40 @(isSelected ? "bg-orange-500/[0.06] dark:bg-orange-500/[0.04]" : "")">
+                            <td class="whitespace-nowrap px-4 py-3 align-top font-mono text-sm font-semibold tabular-nums text-zinc-900 dark:text-zinc-100" translate="no">
+                                #@s.JobId
+                            </td>
+                            <td class="px-4 py-3 align-top">
+                                <div class="flex max-w-[230px] items-center gap-2">
+                                    <span class="shrink-0 rounded border px-1.5 py-px font-mono text-[10px] font-semibold tracking-wider @(s.IsOrg ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400")">
+                                        @(s.IsOrg ? "ORG" : "USER")
+                                    </span>
+                                    <span class="truncate text-zinc-900 dark:text-zinc-200" translate="no" title="@s.Owner/@s.Repo">
+                                        <span class="text-zinc-400 dark:text-zinc-500">@s.Owner/</span>@s.Repo
+                                    </span>
+                                </div>
+                            </td>
+                            <td class="px-4 py-3 align-top">
+                                <div class="font-mono text-[13px] text-zinc-800 dark:text-zinc-200 truncate max-w-[240px]" translate="no" title="@s.RunnerName">
+                                    @s.RunnerName
+                                </div>
+                                <div class="mt-0.5 flex flex-wrap items-center gap-1 font-mono text-[11px] text-zinc-500" translate="no">
+                                    <span class="tabular-nums" title="@(s.ContainerId ?? "")">@DashboardFormatting.ShortId(s.ContainerId, 10)</span>
+                                    @if (!string.IsNullOrEmpty(s.NodeEndpoint))
+                                    {
+                                        <span>· @DashboardFormatting.FormatNodeEndpoint(s.NodeEndpoint)</span>
+                                    }
+                                    else
+                                    {
+                                        <span>· unassigned</span>
+                                    }
+                                    @if (!string.IsNullOrEmpty(s.ProfileName) && !string.Equals(s.ProfileName, "default", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        <span class="rounded border border-orange-500/30 bg-orange-500/10 px-1 text-orange-700 dark:text-orange-300">@s.ProfileName</span>
+                                    }
+                                    @if (s.GpuEnabled)
+                                    {
+                                        <span class="rounded border border-orange-500/30 bg-orange-500/10 px-1 text-orange-700 dark:text-orange-300">gpu</span>
+                                    }
+                                    @if (s.UseDinD)
+                                    {
+                                        <span class="rounded border border-orange-500/30 bg-orange-500/10 px-1 text-orange-700 dark:text-orange-300">dind</span>
+                                    }
+                                    @if (s.CpuCores > 0 || s.MemoryMb > 0)
+                                    {
+                                        <span class="rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900 px-1 text-zinc-600 dark:text-zinc-400">
+                                            @(effCpu)c/@((effMem / 1024.0).ToString("0.#", CultureInfo.InvariantCulture))G
+                                        </span>
+                                    }
+                                </div>
+                            </td>
+                            <td class="px-4 py-3 align-top">
+                                <div class="flex max-w-[240px] flex-wrap gap-1.5">
+                                    @foreach (var lbl in s.Labels)
+                                    {
+                                        var isRequired = string.Equals(lbl, RequiredLabel, StringComparison.OrdinalIgnoreCase);
+                                        <span class="rounded border px-2 py-0.5 font-mono text-[11px] @(isRequired ? "border-orange-500/40 bg-orange-500/5 text-orange-700 dark:text-orange-300" : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/60 text-zinc-600 dark:text-zinc-400")"
+                                              translate="no">
+                                            @lbl
+                                        </span>
+                                    }
+                                </div>
+                            </td>
+                            <td class="px-4 py-3 align-top">
+                                <div class="flex items-center">
+                                    <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[11px] font-medium uppercase tracking-wider @DashboardFormatting.GetStatusPillClass(s.Status)"
+                                          aria-label="Status: @s.Status">
+                                        @if (s.Status == RunnerStatus.Running)
+                                        {
+                                            <span class="relative flex h-2 w-2" aria-hidden="true">
+                                                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 dark:bg-emerald-400 opacity-60"></span>
+                                                <span class="relative h-2 w-2 rounded-full bg-emerald-500 dark:bg-emerald-400"></span>
+                                            </span>
+                                        }
+                                        else if (s.Status == RunnerStatus.Provisioning)
+                                        {
+                                            <svg class="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
+                                                <path d="M21 12a9 9 0 1 1-6.2-8.56" stroke-linecap="round" />
+                                            </svg>
+                                        }
+                                        else
+                                        {
+                                            <span class="h-1.5 w-1.5 rounded-full @DashboardFormatting.GetStatusDotClass(s.Status)" aria-hidden="true"></span>
+                                        }
+                                        @s.Status
+                                    </span>
+                                </div>
+                                @if (!string.IsNullOrEmpty(s.ErrorMessage))
+                                {
+                                    <div class="mt-1 max-w-[240px] truncate font-mono text-[11px] text-rose-600 dark:text-rose-400/90" title="@s.ErrorMessage">
+                                        @s.ErrorMessage
+                                    </div>
+                                }
+                            </td>
+                            <td class="px-4 py-3 align-top">
+                                <div class="w-28">
+                                    <span class="font-mono text-xs tabular-nums @(isActiveJob ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-500 dark:text-zinc-400")">
+                                        @DashboardFormatting.FormatDuration(s)
+                                    </span>
+                                    <div class="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                                        <div class="h-full @DashboardFormatting.GetDurationBarClass(s.Status) @(isActiveJob ? "bar-live" : "")"
+                                             style="width:@(durPct.ToString("F0", CultureInfo.InvariantCulture))%"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-4 py-3 align-top">
+                                <div class="flex items-center justify-end gap-2">
+                                    @if (s.ContainerId != null)
+                                    {
+                                        <button id="btn-logs-@s.JobId"
+                                                type="button"
+                                                aria-expanded="@isSelected"
+                                                @onclick="() => OnOpenLogs.InvokeAsync(s)"
+                                                class="rounded-md border px-2.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-wider transition @(isSelected ? "border-orange-500/50 bg-orange-500/15 text-orange-700 dark:text-orange-300" : "border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-900")">
+                                            Logs
+                                        </button>
+                                    }
+                                    @if (isActiveJob)
+                                    {
+                                        var verb = s.Status == RunnerStatus.Running && s.ContainerId != null ? "Kill" : "Cancel";
+                                        @if (ConfirmingJobId == s.JobId)
+                                        {
+                                            <span class="inline-flex items-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/10 p-0.5 pl-2 font-mono text-[10px] text-rose-700 dark:text-rose-300"
+                                                  role="group"
+                                                  aria-label="Confirm termination for job #@s.JobId">
+                                                @verb?
+                                                <button id="btn-confirm-yes-@s.JobId"
+                                                        type="button"
+                                                        @onclick="() => OnConfirmTerminate.InvokeAsync(s)"
+                                                        class="rounded bg-rose-600 dark:bg-rose-500 px-2 py-0.5 font-semibold uppercase text-white hover:bg-rose-500 dark:hover:bg-rose-400">
+                                                    Confirm
+                                                </button>
+                                                <button type="button"
+                                                        @onclick="() => OnCancelConfirmation.InvokeAsync()"
+                                                        class="rounded px-2 py-0.5 uppercase text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800">
+                                                    No
+                                                </button>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button"
+                                                    @onclick="() => OnRequestConfirmation.InvokeAsync(s.JobId)"
+                                                    class="rounded-md border border-rose-500/30 px-2.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-rose-600 dark:text-rose-400 transition hover:bg-rose-500/10">
+                                                @verb
+                                            </button>
+                                        }
+                                    }
+                                    @if (s.ContainerId == null && !isActiveJob)
+                                    {
+                                        <span class="text-zinc-300 dark:text-zinc-700">—</span>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    </Virtualize>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (TotalSessionCount == 0)
+    {
+        <div class="flex flex-col items-center justify-center gap-1 px-4 py-16 text-center">
+            <div class="mb-2 flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 text-zinc-400 dark:text-zinc-500" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <path d="M4 6h16M4 12h10M4 18h6" />
+                </svg>
+            </div>
+            <p class="text-sm text-zinc-700 dark:text-zinc-300">No workflow jobs received yet</p>
+            <p class="font-mono text-[11px] text-zinc-500">
+                Waiting for <span class="text-zinc-700 dark:text-zinc-300" translate="no">POST /webhook</span> with label
+                <span class="text-orange-600 dark:text-orange-300" translate="no">@RequiredLabel</span>…
+            </p>
+        </div>
+    }
+    else if (FilteredSessions.Count == 0)
+    {
+        <div class="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center">
+            <p class="text-sm text-zinc-700 dark:text-zinc-300">No jobs match the active filter.</p>
+            <button type="button"
+                    @onclick="() => OnResetFilters.InvokeAsync()"
+                    class="rounded-md border border-zinc-300 dark:border-zinc-700 px-3 py-1 font-mono text-[11px] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-900">
+                Reset filters
+            </button>
+        </div>
+    }
+
+    <div class="flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800 px-4 py-2.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-600">
+        <span>showing @FilteredSessions.Count of @TotalSessionCount sessions</span>
+        <span class="flex items-center gap-1.5">
+            <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-400" aria-hidden="true"></span>
+            live · InteractiveServer
+        </span>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<StatusTab> Tabs { get; set; } = [];
+    [Parameter, EditorRequired] public List<RunnerSession> FilteredSessions { get; set; } = [];
+    [Parameter] public int TotalSessionCount { get; set; }
+    [Parameter] public string StatusFilter { get; set; } = "ALL";
+    [Parameter] public string SearchQuery { get; set; } = "";
+    [Parameter] public string RequiredLabel { get; set; } = "";
+    [Parameter] public double AverageJobDurationSeconds { get; set; }
+    [Parameter] public double DefaultCpuLimitCores { get; set; }
+    [Parameter] public long DefaultMemoryLimitMb { get; set; }
+    [Parameter] public long? SelectedJobId { get; set; }
+    [Parameter] public long? ConfirmingJobId { get; set; }
+
+    [Parameter] public EventCallback<string> OnStatusFilterChanged { get; set; }
+    [Parameter] public EventCallback<string> OnSearchQueryChanged { get; set; }
+    [Parameter] public EventCallback OnResetFilters { get; set; }
+    [Parameter] public EventCallback<RunnerSession> OnOpenLogs { get; set; }
+    [Parameter] public EventCallback<long> OnRequestConfirmation { get; set; }
+    [Parameter] public EventCallback OnCancelConfirmation { get; set; }
+    [Parameter] public EventCallback<RunnerSession> OnConfirmTerminate { get; set; }
+
+    private Task HandleSearchInput(ChangeEventArgs e) =>
+        OnSearchQueryChanged.InvokeAsync(e.Value?.ToString() ?? "");
+}

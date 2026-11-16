@@ -1,0 +1,57 @@
+@namespace RunnerOrchestrator.Components
+@using Microsoft.AspNetCore.Components.Web
+
+<!DOCTYPE html>
+<html lang="en" class="bg-zinc-50 dark:bg-[#0a0a0b]">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)" />
+    <title>GiTorch</title>
+    <base href="/" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <script src="@Assets["app.js"]"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                        mono: ['"Geist Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+                        brand: ['"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                    },
+                },
+            },
+        };
+    </script>
+    <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
+</head>
+<body class="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-[#0a0a0b] dark:text-zinc-200 font-sans antialiased transition-colors duration-150">
+    <div id="components-reconnect-modal"
+         role="status"
+         aria-live="polite"
+         class="fixed top-3 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,34rem)] items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-white/95 dark:bg-[#0c0c0e]/95 px-3.5 py-2.5 shadow-xl backdrop-blur">
+        <div class="flex items-center gap-2 font-mono text-xs text-amber-700 dark:text-amber-300">
+            <svg class="animate-spin shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-6.2-8.56" stroke-linecap="round" />
+            </svg>
+            <span>Live connection interrupted…</span>
+        </div>
+        <button type="button"
+                class="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 disabled:opacity-50"
+                onclick="window.gitorchUi.reconnect(this)">
+            Reconnect
+        </button>
+    </div>
+
+    <Dashboard @rendermode="RenderMode.InteractiveServer" />
+
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

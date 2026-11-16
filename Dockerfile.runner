@@ -1,0 +1,27 @@
+FROM docker:27-cli AS docker-cli
+
+FROM debian:bookworm-slim
+
+ARG RUNNER_VERSION=2.321.0
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    libicu72 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+
+RUN useradd -m -s /bin/bash runner
+USER runner
+WORKDIR /home/runner
+
+RUN curl -fsSL -o actions-runner.tar.gz \
+      "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \
+    && tar xzf actions-runner.tar.gz \
+    && rm actions-runner.tar.gz
+
+ENTRYPOINT ["./run.sh"]

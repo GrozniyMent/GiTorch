@@ -1,0 +1,382 @@
+@namespace RunnerOrchestrator.Components.Sections
+@using System.Text
+@using gitorch.Models
+@using gitorch.Services.Abstractions
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@using RunnerOrchestrator.Components.Support
+@implements IDisposable
+@inject IRunnerLogReader LogReader
+@inject IJSRuntime JS
+
+<div class="fixed inset-0 z-40 @(Session == null ? "pointer-events-none" : "")"
+     aria-hidden="@(Session == null)">
+    <div @onclick="CloseAsync"
+         class="absolute inset-0 bg-black/40 dark:bg-black/60 transition-opacity duration-200 @(Session != null ? "opacity-100" : "opacity-0")"></div>
+
+    <aside id="log-drawer-panel"
+           role="dialog"
+           aria-modal="true"
+           aria-labelledby="drawer-title"
+           tabindex="-1"
+           @onkeydown="HandleKeyDownAsync"
+           class="absolute right-0 top-0 flex h-full w-full max-w-4xl flex-col border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e] shadow-2xl transition-transform duration-200 focus:outline-none @(Session != null ? "translate-x-0" : "translate-x-full")">
+        @if (Session != null)
+        {
+            var effCpu = Session.CpuCores > 0 ? Session.CpuCores : DefaultCpuLimitCores;
+            var effMem = Session.MemoryMb > 0 ? Session.MemoryMb : DefaultMemoryLimitMb;
+
+            <div class="flex items-start justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 px-4 py-3">
+                <div class="min-w-0">
+                    <h2 id="drawer-title" class="font-mono text-sm font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums">
+                        Container Logs — #@Session.JobId
+                    </h2>
+                    <div class="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-zinc-500">
+                        <span translate="no">@Session.Owner/@Session.Repo</span>
+                        <span>·</span>
+                        <span class="tabular-nums" translate="no">@DashboardFormatting.ShortId(Session.ContainerId, 12)</span>
+                        <span>·</span>
+                        <span class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider @DashboardFormatting.GetStatusPillClass(Session.Status)">
+                            @Session.Status
+                        </span>
+                        @if (_isStreaming)
+                        {
+                            <span class="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                                <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-400" aria-hidden="true"></span>
+                                LIVE
+                            </span>
+                        }
+                        @if (!string.IsNullOrEmpty(Session.NodeEndpoint))
+                        {
+                            <span>· @DashboardFormatting.FormatNodeEndpoint(Session.NodeEndpoint)</span>
+                        }
+                        <span>· @(effCpu)c / @effMem MB</span>
+                    </div>
+                </div>
+                <button type="button"
+                        aria-label="Close logs"
+                        @onclick="CloseAsync"
+                        class="rounded-md border border-zinc-200 dark:border-zinc-800 p-1.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-100">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                        <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(Session.ErrorMessage))
+            {
+                <div role="alert" class="border-b border-rose-500/30 bg-rose-500/10 px-4 py-2 font-mono text-xs text-rose-700 dark:text-rose-300">
+                    @Session.ErrorMessage
+                </div>
+            }
+
+            <div class="flex flex-wrap items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 px-4 py-2">
+                <button type="button"
+                        @onclick="RefreshStreamAsync"
+                        class="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 font-mono text-[11px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+                        <path d="M21 3v5h-5" />
+                    </svg>
+                    Refresh
+                </button>
+
+                <label class="inline-flex cursor-pointer items-center gap-2 rounded-md border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 font-mono text-[11px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900">
+                    <input type="checkbox"
+                           checked="@_autoScroll"
+                           @onchange="OnAutoScrollChangedAsync"
+                           class="peer sr-only" />
+                    <span class="relative h-3.5 w-6 rounded-full bg-zinc-300 dark:bg-zinc-700 transition peer-checked:bg-orange-500 after:absolute after:left-0.5 after:top-0.5 after:h-2.5 after:w-2.5 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-2.5"></span>
+                    Auto-scroll
+                </label>
+
+                <button type="button"
+                        aria-pressed="@_stderrOnly"
+                        @onclick="() => _stderrOnly = !_stderrOnly"
+                        class="rounded-md border px-2 py-1 font-mono text-[11px] transition @(_stderrOnly ? "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300" : "border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200")">
+                    STDERR
+                </button>
+
+                <button type="button"
+                        aria-pressed="@_showTimestamps"
+                        @onclick="() => _showTimestamps = !_showTimestamps"
+                        class="rounded-md border px-2 py-1 font-mono text-[11px] transition @(_showTimestamps ? "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-200" : "border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-800 dark:hover:text-zinc-300")">
+                    Timestamps
+                </button>
+
+                <input type="search"
+                       name="logSearch"
+                       autocomplete="off"
+                       spellcheck="false"
+                       aria-label="Search inside logs"
+                       placeholder="Find in logs…"
+                       @bind="_logSearch"
+                       @bind:event="oninput"
+                       class="w-36 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 px-2 py-1 font-mono text-[11px] text-zinc-900 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none" />
+
+                <div class="ml-auto flex items-center gap-1.5">
+                    @if (!_autoScroll)
+                    {
+                        <button type="button"
+                                @onclick="JumpToBottomAsync"
+                                class="rounded-md border border-orange-500/40 bg-orange-500/10 px-2 py-1 font-mono text-[11px] text-orange-700 dark:text-orange-300 hover:bg-orange-500/20">
+                            ↓ Bottom
+                        </button>
+                    }
+                    <button type="button"
+                            disabled="@(_logLines.Count == 0)"
+                            @onclick="CopyLogsAsync"
+                            class="rounded-md border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 font-mono text-[11px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 disabled:opacity-40">
+                        Copy
+                    </button>
+                    <button type="button"
+                            disabled="@(_logLines.Count == 0)"
+                            @onclick="DownloadLogsAsync"
+                            class="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 px-2.5 py-1 font-mono text-[11px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 disabled:opacity-40">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 3v12" />
+                            <path d="m7 10 5 5 5-5" />
+                            <path d="M5 21h14" />
+                        </svg>
+                        Download .log
+                    </button>
+                </div>
+            </div>
+
+            <div @ref="_logPreRef"
+                 @onscroll="HandleLogScrollAsync"
+                 class="term relative flex-1 overflow-auto bg-[#09090b] dark:bg-black/60 overscroll-contain">
+                @if (VisibleLogLines.Count == 0)
+                {
+                    <div class="flex h-full items-center justify-center gap-2 font-mono text-xs text-zinc-500">
+                        @if (_isStreaming)
+                        {
+                            <svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                                <path d="M21 12a9 9 0 1 1-6.2-8.56" stroke-linecap="round" />
+                            </svg>
+                            <span>Waiting for container output…</span>
+                        }
+                        else
+                        {
+                            <span>No logs available yet.</span>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <pre translate="no" class="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-zinc-300">@foreach (var line in VisibleLogLines){<span class="block">@if (_showTimestamps && line.Timestamp != null){<span class="select-none text-zinc-600">@line.Timestamp  </span>}<span class="@DashboardFormatting.GetLogLineClass(line)">@(line.IsStderr ? "[ERR] " : "")@line.Message</span></span>}@if (_isStreaming){<span class="inline-block h-3 w-1.5 animate-pulse bg-zinc-400 align-middle"></span>}</pre>
+                }
+            </div>
+
+            <div class="flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800 px-4 py-1.5 font-mono text-[10px] text-zinc-500 dark:text-zinc-600">
+                <span>@VisibleLogLines.Count lines @(string.IsNullOrWhiteSpace(_logSearch) ? "" : $"(filtered from {_logLines.Count})")</span>
+                <span>Esc to close</span>
+            </div>
+        }
+    </aside>
+</div>
+
+@code {
+    private const int MaxLogLines = 1500;
+
+    [Parameter] public RunnerSession? Session { get; set; }
+    [Parameter] public double DefaultCpuLimitCores { get; set; }
+    [Parameter] public long DefaultMemoryLimitMb { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<(string Message, string Kind)> OnNotify { get; set; }
+
+    private readonly List<LogEntry> _logLines = [];
+    private string _partialStdout = "";
+    private string _partialStderr = "";
+    private bool _isStreaming;
+    private bool _autoScroll = true;
+    private bool _stderrOnly;
+    private bool _showTimestamps = true;
+    private string _logSearch = "";
+    private ElementReference _logPreRef;
+    private CancellationTokenSource? _logStreamCts;
+    private long? _activeJobId;
+    private string? _activeContainerId;
+
+    private List<LogEntry> VisibleLogLines => _logLines
+        .Where(l => !_stderrOnly || l.IsStderr)
+        .Where(l => string.IsNullOrWhiteSpace(_logSearch) ||
+                    l.Message.Contains(_logSearch, StringComparison.OrdinalIgnoreCase) ||
+                    (l.Timestamp?.Contains(_logSearch, StringComparison.OrdinalIgnoreCase) ?? false))
+        .ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Session == null)
+        {
+            if (_activeJobId != null)
+            {
+                CancelLogStream();
+                _activeJobId = null;
+                _activeContainerId = null;
+                _isStreaming = false;
+            }
+            return;
+        }
+
+        if (_activeJobId != Session.JobId || _activeContainerId != Session.ContainerId)
+        {
+            _activeJobId = Session.JobId;
+            _activeContainerId = Session.ContainerId;
+            await StartStreamAsync(Session);
+        }
+    }
+
+    private Task RefreshStreamAsync() =>
+        Session != null ? StartStreamAsync(Session) : Task.CompletedTask;
+
+    private async Task StartStreamAsync(RunnerSession session)
+    {
+        CancelLogStream();
+        _logLines.Clear();
+        _partialStdout = "";
+        _partialStderr = "";
+        _autoScroll = true;
+
+        if (session.ContainerId == null)
+            return;
+
+        _logStreamCts = new CancellationTokenSource();
+        var ct = _logStreamCts.Token;
+        _isStreaming = true;
+        StateHasChanged();
+
+        await Task.Yield();
+        await JS.InvokeVoidAsync("gitorchUi.focusSelector", "#log-drawer-panel");
+
+        _ = StreamLogsInBackgroundAsync(session.ContainerId, ct);
+    }
+
+    private async Task StreamLogsInBackgroundAsync(string containerId, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var chunk in LogReader.StreamContainerLogsAsync(containerId, ct))
+            {
+                AppendLogChunk(chunk);
+                await InvokeAsync(StateHasChanged);
+                if (_autoScroll)
+                    await JS.InvokeAsync<bool>("gitorchUi.scrollToBottom", _logPreRef, false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when switching containers or closing the drawer.
+        }
+        finally
+        {
+            FlushPartialLogs();
+            if (!ct.IsCancellationRequested)
+            {
+                _isStreaming = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    private async Task HandleKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await CloseAsync();
+    }
+
+    private async Task OnAutoScrollChangedAsync(ChangeEventArgs e)
+    {
+        _autoScroll = e.Value is true;
+        if (_autoScroll)
+            await JS.InvokeAsync<bool>("gitorchUi.scrollToBottom", _logPreRef, true);
+    }
+
+    private async Task HandleLogScrollAsync()
+    {
+        _autoScroll = await JS.InvokeAsync<bool>("gitorchUi.isNearBottom", _logPreRef);
+    }
+
+    private async Task JumpToBottomAsync()
+    {
+        _autoScroll = true;
+        await JS.InvokeAsync<bool>("gitorchUi.scrollToBottom", _logPreRef, true);
+    }
+
+    private async Task CopyLogsAsync()
+    {
+        await JS.InvokeAsync<bool>("gitorchUi.copyText", BuildExportLogs());
+        await OnNotify.InvokeAsync(("Logs copied to clipboard.", "info"));
+    }
+
+    private async Task DownloadLogsAsync()
+    {
+        if (Session == null)
+            return;
+
+        var filename = $"gitorch-job-{Session.JobId}.log";
+        await JS.InvokeVoidAsync("gitorchUi.downloadLog", filename, BuildExportLogs());
+        await OnNotify.InvokeAsync(($"Downloaded {filename}.", "success"));
+    }
+
+    private string BuildExportLogs()
+    {
+        var sb = new StringBuilder();
+        foreach (var line in VisibleLogLines)
+            sb.AppendLine(DashboardFormatting.FormatLogLine(line, _showTimestamps));
+        return sb.ToString();
+    }
+
+    private void AppendLogChunk(string chunk)
+    {
+        const string stderrPrefix = "[STDERR] ";
+        var isStderr = chunk.StartsWith(stderrPrefix, StringComparison.Ordinal);
+        var text = isStderr ? chunk[stderrPrefix.Length..] : chunk;
+
+        var combined = (isStderr ? _partialStderr : _partialStdout) + text.Replace("\r\n", "\n");
+        var parts = combined.Split('\n');
+
+        for (var i = 0; i < parts.Length - 1; i++)
+            AddLine(parts[i], isStderr);
+
+        if (isStderr)
+            _partialStderr = parts[^1];
+        else
+            _partialStdout = parts[^1];
+    }
+
+    private void FlushPartialLogs()
+    {
+        if (!string.IsNullOrEmpty(_partialStdout))
+        {
+            AddLine(_partialStdout, isStderr: false);
+            _partialStdout = "";
+        }
+        if (!string.IsNullOrEmpty(_partialStderr))
+        {
+            AddLine(_partialStderr, isStderr: true);
+            _partialStderr = "";
+        }
+    }
+
+    private void AddLine(string rawLine, bool isStderr)
+    {
+        _logLines.Add(DashboardFormatting.ParseLogLine(rawLine, isStderr));
+        if (_logLines.Count > MaxLogLines)
+            _logLines.RemoveRange(0, _logLines.Count - MaxLogLines);
+    }
+
+    private void CancelLogStream()
+    {
+        if (_logStreamCts != null)
+        {
+            _logStreamCts.Cancel();
+            _logStreamCts.Dispose();
+            _logStreamCts = null;
+        }
+    }
+
+    public void Dispose() => CancelLogStream();
+}

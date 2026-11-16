@@ -1,0 +1,30 @@
+services:
+  gitorch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gitorch
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+      - ./private-key.pem:/app/private-key.pem:ro
+    environment:
+      Orchestrator__AppId: "${GITHUB_APP_ID:?Set GITHUB_APP_ID}"
+      Orchestrator__WebhookSecret: "${GITHUB_WEBHOOK_SECRET:?Set GITHUB_WEBHOOK_SECRET}"
+      Orchestrator__PrivateKeyPathOrPem: "/app/private-key.pem"
+      Orchestrator__RunnerImage: "${RUNNER_IMAGE:-gitorch-runner:latest}"
+      Orchestrator__UseDinDSidecar: "${USE_DIND_SIDECAR:-true}"
+      Orchestrator__EnableRepoCache: "${ENABLE_REPO_CACHE:-true}"
+      Orchestrator__DashboardUsername: "${DASHBOARD_USER:-admin}"
+      Orchestrator__DashboardPassword: "${DASHBOARD_PASSWORD:-}"
+
+  runner-image:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    image: ${RUNNER_IMAGE:-gitorch-runner:latest}
+    profiles: ["build-only"]
+
