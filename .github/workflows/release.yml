@@ -51,7 +51,7 @@ jobs:
 
       - name: Extract metadata for orchestrator image
         id: meta-app
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
           flavor: |
@@ -73,7 +73,7 @@ jobs:
 
       - name: Extract metadata for runner image
         id: meta-runner
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}-runner
           flavor: |
