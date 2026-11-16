@@ -1,85 +1,85 @@
-# Быстрый старт и настройка GitHub App
+# Getting Started & GitHub App Setup
 
-Это руководство поможет развернуть GiTorch с нуля и подключить его к вашему репозиторию или организации GitHub.
+This guide walks you through deploying GiTorch from scratch and connecting it to your GitHub repository or organization.
 
-## 1. Создание GitHub App
+## 1. Create a GitHub App
 
-GiTorch использует GitHub App для получения событий о задачах workflow и выдачи одноразовых токенов регистрации (Just-In-Time runners).
+GiTorch uses a GitHub App to receive workflow job events and issue short-lived Just-In-Time (JIT) runner registration tokens.
 
-1. Откройте настройки вашего аккаунта или организации в GitHub: **Settings → Developer settings → GitHub Apps → New GitHub App**.
-2. Заполните основные поля:
-   - **GitHub App name**: например, `GiTorch Runner` (имя должно быть уникальным в пределах GitHub).
-   - **Homepage URL**: URL вашей панели GiTorch или репозитория.
-   - **Webhook**: отметьте **Active**.
-   - **Webhook URL**: публичный адрес вашего сервера с путём `/webhook`, например `https://runners.example.com/webhook`.
-   - **Webhook secret**: сгенерируйте надёжную случайную строку и сохраните её для `GITHUB_WEBHOOK_SECRET`.
-3. Настройте права доступа (**Repository permissions** / **Organization permissions**):
-   - Для работы в рамках **личных или отдельных репозиториев**:
-     - **Administration**: Read and write (или **Self-hosted runners** на уровне организации).
-     - **Actions**: Read-only.
-     - **Metadata**: Read-only.
-   - Для работы на уровне **организации** (рекомендуется для нескольких репозиториев):
+1. Open your GitHub account or organization settings: **Settings → Developer settings → GitHub Apps → New GitHub App**.
+2. Fill in the basic details:
+   - **GitHub App name**: e.g. `GiTorch Runner` (must be globally unique on GitHub).
+   - **Homepage URL**: URL of your GiTorch dashboard or repository.
+   - **Webhook**: check **Active**.
+   - **Webhook URL**: public URL of your instance with the `/webhook` path, e.g. `https://runners.example.com/webhook`.
+   - **Webhook secret**: generate a strong random string and save it for `GITHUB_WEBHOOK_SECRET`.
+3. Configure permissions (**Repository permissions** / **Organization permissions**):
+   - For **personal or individual repositories**:
+     - **Administration**: Read and write
+     - **Actions**: Read-only
+     - **Metadata**: Read-only
+   - For **organizations** (recommended when serving multiple repositories):
      - **Organization permissions → Self-hosted runners**: Read and write.
-4. В разделе **Subscribe to events** отметьте **Workflow job** (`workflow_job`).
-5. Нажмите **Create GitHub App**.
-6. На странице созданного приложения:
-   - Скопируйте **App ID** (понадобится для `GITHUB_APP_ID`).
-   - В разделе **Private keys** нажмите **Generate a private key** — скачается `.pem`-файл. Переименуйте его в `private-key.pem` и положите рядом с `docker-compose.yml`.
-7. Откройте вкладку **Install App** слева и установите приложение в нужную организацию или на выбранные репозитории.
+4. Under **Subscribe to events**, check **Workflow job** (`workflow_job`).
+5. Click **Create GitHub App**.
+6. On the app's settings page:
+   - Copy the **App ID** (used for `GITHUB_APP_ID`).
+   - Under **Private keys**, click **Generate a private key** to download the `.pem` file. Rename it to `private-key.pem` and place it next to `docker-compose.yml`.
+7. Open the **Install App** tab on the left and install the app on your organization or selected repositories.
 
-## 2. Подготовка окружения
+## 2. Prepare Environment Configuration
 
-Создайте файл `.env` в корневой директории с проектом:
+Create a `.env` file in the project directory:
 
 ```env
 GITHUB_APP_ID=123456
 GITHUB_WEBHOOK_SECRET=your-strong-webhook-secret
 
-# Образ раннера (собирается локально или загружается из GHCR)
+# Runner image (built locally or pulled from GHCR)
 RUNNER_IMAGE=gitorch-runner:latest
 
-# Изолированные Docker-сборки внутри раннеров
+# Isolated Docker builds inside runners
 USE_DIND_SIDECAR=true
 
-# Общий том кэша для ускорения сборок по каждому репозиторию
+# Per-repository persistent cache volume
 ENABLE_REPO_CACHE=true
 
-# Авторизация в веб-интерфейсе
+# Web dashboard authentication
 DASHBOARD_USER=admin
 DASHBOARD_PASSWORD=change-this-password
 ```
 
-Если вы используете собственный образ раннера из репозитория, соберите его заранее:
+If you want to build the bundled runner image locally instead of pulling a prebuilt image:
 
 ```bash
 docker compose --profile build-only build runner-image
 ```
 
-## 3. Запуск
+## 3. Start GiTorch
 
-Запустите GiTorch в фоновом режиме:
+Start the service in the background:
 
 ```bash
 docker compose up -d
 ```
 
-Проверьте состояние сервиса:
+Verify the health endpoint:
 
 ```bash
 curl http://localhost:8080/health
 ```
 
-Ожидаемый ответ:
+Expected response:
 
 ```json
 {"status":"healthy"}
 ```
 
-Откройте веб-панель в браузере по адресу `http://localhost:8080` и войдите с логином и паролем из `.env`.
+Open `http://localhost:8080` in your browser and sign in with the username and password from `.env`.
 
-## 4. Тестовый workflow в GitHub Actions
+## 4. Run a Test Workflow
 
-Добавьте или обновите workflow-файл `.github/workflows/ci.yml` в одном из подключённых репозиториев:
+Add `.github/workflows/ci.yml` to one of your connected repositories:
 
 ```yaml
 name: Ephemeral Runner Test
@@ -97,5 +97,4 @@ jobs:
           whoami
 ```
 
-Запустите workflow вручную во вкладке **Actions**. В веб-панели GiTorch задача сразу появится со статусом `Queued`, перейдёт в `Provisioning`, затем в `Running` (доступны живые логи по кнопке **Logs**) и после завершения контейнер будет автоматически удалён.
-
+Trigger the workflow manually from the **Actions** tab. In the GiTorch dashboard, the job will immediately appear as `Queued`, move through `Provisioning` to `Running` (with live logs available via **Logs**), and its container will be automatically removed once finished.

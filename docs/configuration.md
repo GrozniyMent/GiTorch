@@ -1,50 +1,49 @@
-# Справочник конфигурации
+# Configuration Reference
 
-GiTorch настраивается через переменные окружения (с префиксом `Orchestrator__`) или через секцию `Orchestrator` в файле `appsettings.json`. При использовании стандартного `docker-compose.yml` основные параметры удобно задавать через `.env`.
+GiTorch is configured via environment variables (prefixed with `Orchestrator__`) or the `Orchestrator` section in `appsettings.json`. When using the provided `docker-compose.yml`, common settings can be placed directly in `.env`.
 
-## Параметры GitHub App и отбора задач
+## GitHub App & Job Matching
 
-| Переменная окружения | По умолчанию | Описание |
+| Environment Variable | Default | Description |
 | :--- | :--- | :--- |
-| `Orchestrator__AppId` | *(обязательно)* | Идентификатор вашего GitHub App (`App ID`). |
-| `Orchestrator__WebhookSecret` | *(обязательно)* | Секрет для проверки подписи входящих вебхуков GitHub (`X-Hub-Signature-256`). |
-| `Orchestrator__PrivateKeyPathOrPem` | `/app/private-key.pem` | Путь к `.pem`-файлу приватного ключа внутри контейнера или сам ключ в формате PEM. |
-| `Orchestrator__RequiredLabel` | `self-hosted` | Обязательная метка в `runs-on`, по которой GiTorch отбирает задачи для обработки. Задачи без этой метки игнорируются. |
-| `Orchestrator__RunnerGroupId` | `1` | ID группы раннеров в организации GitHub (`1` — группа `Default`). |
+| `Orchestrator__AppId` | *(required)* | GitHub App ID. |
+| `Orchestrator__WebhookSecret` | *(required)* | Secret used to validate incoming GitHub webhook signatures (`X-Hub-Signature-256`). |
+| `Orchestrator__PrivateKeyPathOrPem` | `/app/private-key.pem` | Path to the `.pem` private key file inside the container or inline PEM content. |
+| `Orchestrator__RequiredLabel` | `self-hosted` | Label that must be present in `runs-on` for GiTorch to pick up a job. |
+| `Orchestrator__RunnerGroupId` | `1` | Target GitHub organization runner group ID (`1` = `Default`). |
 
-## Контейнеры, ресурсы и кэширование
+## Containers, Resource Limits & Caching
 
-| Переменная окружения | По умолчанию | Описание |
+| Environment Variable | Default | Description |
 | :--- | :--- | :--- |
-| `Orchestrator__RunnerImage` | `ghcr.io/owner/repo/gh-runner:latest` | Docker-образ эфемерного раннера по умолчанию. |
-| `Orchestrator__MaxConcurrentRunners` | `4` | Максимальное количество одновременно выполняемых задач. |
-| `Orchestrator__CpuLimitCores` | `2.0` | Лимит CPU (в ядрах) на один контейнер раннера. |
-| `Orchestrator__MemoryLimitMb` | `4096` | Лимит оперативной памяти (в МБ) на один контейнер раннера. |
-| `Orchestrator__PidsLimit` | `512` | Максимальное число процессов (PID) внутри контейнера раннера (защита от fork-бомб). |
-| `Orchestrator__JobTimeoutMinutes` | `60` | Максимальная длительность выполнения одной задачи в минутах. |
-| `Orchestrator__RunnerNetworkName` | `gitorch-runners` | Имя изолированной Docker-сети для контейнеров раннеров и DinD-сайдкар. |
-| `Orchestrator__EnableRepoCache` | `false` | Создаёт персональный Docker-том кэша для каждого репозитория (`<prefix>-<owner>-<repo>`). |
-| `Orchestrator__CacheMountPath` | `/runner-cache` | Путь монтирования кэша внутри контейнера и значение переменной `GITORCH_CACHE_DIR`. |
-| `Orchestrator__CacheVolumePrefix` | `gitorch-cache` | Префикс имён создаваемых томов кэша. |
+| `Orchestrator__RunnerImage` | `ghcr.io/owner/repo/gh-runner:latest` | Default Docker image for ephemeral runners. |
+| `Orchestrator__MaxConcurrentRunners` | `4` | Maximum number of concurrent runner containers. |
+| `Orchestrator__CpuLimitCores` | `2.0` | CPU limit (cores) per runner container. |
+| `Orchestrator__MemoryLimitMb` | `4096` | Memory limit (MB) per runner container. |
+| `Orchestrator__PidsLimit` | `512` | Maximum number of processes (PIDs) per runner container. |
+| `Orchestrator__JobTimeoutMinutes` | `60` | Maximum execution time per job in minutes. |
+| `Orchestrator__RunnerNetworkName` | `gitorch-runners` | Isolated Docker bridge network name for runners and DinD sidecars. |
+| `Orchestrator__EnableRepoCache` | `false` | Enables a dedicated persistent Docker cache volume per repository (`<prefix>-<owner>-<repo>`). |
+| `Orchestrator__CacheMountPath` | `/runner-cache` | Mount path inside the runner container and value of `GITORCH_CACHE_DIR`. |
+| `Orchestrator__CacheVolumePrefix` | `gitorch-cache` | Prefix for generated cache volume names. |
 
-## Приватный Docker Registry
+## Private Docker Registry
 
-Если образ раннера хранится в закрытом реестре (например, приватный GHCR, Harbor или AWS ECR), укажите учётные данные для автоматического `pull`:
+If your runner images are hosted in a private registry (such as private GHCR, Harbor, or AWS ECR), provide credentials for automatic pulls:
 
-| Переменная окружения | По умолчанию | Описание |
+| Environment Variable | Default | Description |
 | :--- | :--- | :--- |
-| `Orchestrator__RegistryServer` | *(авто из `RunnerImage`)* | Адрес реестра (например, `ghcr.io` или `registry.company.com`). |
-| `Orchestrator__RegistryUsername` | `""` | Имя пользователя или токен-аккаунт реестра. |
-| `Orchestrator__RegistryPassword` | `""` | Пароль или PAT (для GHCR — токен с правом `read:packages`). |
+| `Orchestrator__RegistryServer` | *(inferred from `RunnerImage`)* | Registry hostname (e.g. `ghcr.io` or `registry.company.com`). |
+| `Orchestrator__RegistryUsername` | `""` | Registry username. |
+| `Orchestrator__RegistryPassword` | `""` | Registry password or access token (e.g. a PAT with `read:packages` for GHCR). |
 
-## Хранилище, жизненный цикл и очистка
+## Storage, Lifecycle & Retention
 
-| Переменная окружения | По умолчанию | Описание |
+| Environment Variable | Default | Description |
 | :--- | :--- | :--- |
-| `Orchestrator__DatabaseProvider` | `Sqlite` | Движок хранения истории: `Sqlite` (один инстанс) или `Postgres` (кластер). |
-| `Orchestrator__DatabasePath` | `data/gitorch.db` | Путь к файлу SQLite при `DatabaseProvider=Sqlite`. |
-| `Orchestrator__DeliveryRetentionDays` | `7` | Сколько дней хранить историю ID доставок вебхуков (защита от дублей). |
-| `Orchestrator__SessionRetentionDays` | `30` | Сколько дней хранить завершённые сессии задач в базе данных. |
-| `Orchestrator__RetentionCleanupIntervalMinutes` | `60` | Периодичность запуска фоновой очистки устаревших записей. |
-| `Orchestrator__ShutdownTimeoutSeconds` | `30` | Время ожидания корректного завершения активных раннеров при остановке GiTorch. |
-
+| `Orchestrator__DatabaseProvider` | `Sqlite` | Storage backend: `Sqlite` (single instance) or `Postgres` (multi-replica cluster). |
+| `Orchestrator__DatabasePath` | `data/gitorch.db` | SQLite database file path when `DatabaseProvider=Sqlite`. |
+| `Orchestrator__DeliveryRetentionDays` | `7` | Number of days to retain webhook delivery IDs for deduplication. |
+| `Orchestrator__SessionRetentionDays` | `30` | Number of days to retain completed job sessions in the database. |
+| `Orchestrator__RetentionCleanupIntervalMinutes` | `60` | Interval in minutes between background retention cleanup runs. |
+| `Orchestrator__ShutdownTimeoutSeconds` | `30` | Graceful shutdown window to wait for active runners before stopping them. |

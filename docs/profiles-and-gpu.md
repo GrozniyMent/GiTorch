@@ -1,12 +1,12 @@
-# Профили раннеров, NVIDIA GPU и Docker-in-Docker
+# Runner Profiles, NVIDIA GPU & Docker-in-Docker
 
-GiTorch позволяет гибко маршрутизировать задачи из `runs-on` в разные конфигурации контейнеров - от лёгких сборщиков до мощных GPU-раннеров или изолированных сред для сборки Docker-образов.
+GiTorch lets you route `runs-on` labels to different container configurations — from lightweight build runners to GPU-accelerated machines or isolated Docker build environments.
 
-## Профили раннеров (`Profiles`)
+## Runner Profiles (`Profiles`)
 
-Вы можете определить именованные профили с собственным образом, лимитами CPU/RAM, таймаутами и флагами GPU/DinD. Профиль выбирается автоматически, если задача в GitHub Actions содержит **все** метки из `MatchLabels` этого профиля.
+You can define named profiles with dedicated images, CPU/memory limits, timeouts, and GPU/DinD flags. A profile is selected automatically when a GitHub Actions job includes **all** labels listed in that profile's `MatchLabels`.
 
-### Пример настройки через `appsettings.json`
+### Example in `appsettings.json`
 
 ```json
 {
@@ -36,7 +36,7 @@ GiTorch позволяет гибко маршрутизировать зада�
 }
 ```
 
-Эти же настройки можно передавать переменными окружения:
+The same settings can be passed via environment variables:
 
 ```env
 Orchestrator__Profiles__0__Name=gpu-ml
@@ -47,7 +47,7 @@ Orchestrator__Profiles__0__CpuLimitCores=8
 Orchestrator__Profiles__0__EnableGpu=true
 ```
 
-### Пример workflow в GitHub Actions
+### Example GitHub Actions Workflow
 
 ```yaml
 jobs:
@@ -58,31 +58,30 @@ jobs:
       - run: nvidia-smi
 ```
 
-Если ни один профиль не подошёл под метки задачи, применяются глобальные значения по умолчанию (`default`). Все настроенные образы автоматически подтягиваются при старте GiTorch и по кнопке **Pull image** в веб-панели.
+If no profile matches the job's labels, GiTorch falls back to the global default settings. All configured profile images are pulled automatically on startup and whenever you click **Pull image** in the dashboard.
 
-## Запуск с NVIDIA GPU (`EnableGpu`)
+## NVIDIA GPU Passthrough (`EnableGpu`)
 
-Для проброса видеокарт NVIDIA в контейнеры раннеров:
+To run jobs on NVIDIA GPUs:
 
-1. Установите на хост драйвер NVIDIA и `nvidia-container-toolkit`.
-2. Убедитесь, что Docker настроен с поддержкой GPU (`docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi`).
-3. Укажите `"EnableGpu": true` в нужном профиле. GiTorch запросит все доступные GPU-устройства через драйвер `nvidia` для каждой задачи этого профиля.
+1. Install the NVIDIA driver and `nvidia-container-toolkit` on the Docker host.
+2. Verify Docker GPU support works (`docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi`).
+3. Set `"EnableGpu": true` on the target profile. GiTorch requests NVIDIA GPU devices automatically for matching jobs.
 
-## Сборка Docker-образов внутри раннеров: DinD vs Socket
+## Running Docker Builds Inside Runners: DinD vs. Host Socket
 
-Если в ваших workflow запускаются команды `docker build`, `docker compose` или `testcontainers`, есть два режима:
+If your workflows run `docker build`, `docker compose`, or `testcontainers`, choose between two modes:
 
-### Вариант 1: Изолированный DinD-сайдкар (рекомендуется)
+### Option 1: Isolated DinD Sidecar (Recommended)
 
-Включите `Orchestrator__UseDinDSidecar=true` (глобально или на уровне профиля):
-- Для каждого раннера поднимается персональный временный сайдкар-контейнер (`docker:27-dind`), подключённый к той же изолированной Docker-сети.
-- Раннер получает переменную `DOCKER_HOST=tcp://<runner>-dind:2375`.
-- Пользовательские контейнеры **не видят** демона хоста и другие раннеры, а все временные образы и тома исчезают сразу после завершения задачи.
-- На уровне профиля при необходимости можно переопределить образ сайдкара (`Orchestrator__DinDImage`).
+Set `Orchestrator__UseDinDSidecar=true` (globally or per profile):
+- Each runner receives its own short-lived Docker-in-Docker sidecar (`docker:27-dind`) on the isolated runner network.
+- The runner container gets `DOCKER_HOST=tcp://<runner>-dind:2375`.
+- Builds cannot see the host Docker daemon or sibling runners, and all temporary images/volumes are wiped when the job ends.
+- You can customize the sidecar image via `Orchestrator__DinDImage`.
 
-### Вариант 2: Проброс Docker-сокета хоста
+### Option 2: Host Docker Socket Mount
 
-Если требуется общий кэш слоёв Docker на хосте или запуск непривилегированных контейнеров не подходит, можно включить `Orchestrator__MountDockerSocket=true`.
+If you need shared host Docker layer caching and cannot use DinD, you can set `Orchestrator__MountDockerSocket=true`.
 
-> **Предупреждение о безопасности:** монтирование `/var/run/docker.sock` внутрь контейнера раннера фактически даёт выполняемому CI-коду полный root-доступ к хосту. Используйте этот режим **только для доверенных приватных репозиториев**.
-
+> **Security warning:** mounting `/var/run/docker.sock` gives CI jobs effective root access to the host machine. Only enable this for trusted private repositories.

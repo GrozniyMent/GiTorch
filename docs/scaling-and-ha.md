@@ -1,14 +1,14 @@
-# Масштабирование и отказоустойчивость (HA)
+# Scaling & High Availability (HA)
 
-GiTorch поддерживает как горизонтальное распределение контейнеров раннеров по нескольким Docker-хостам, так и запуск нескольких реплик самого оркестратора для высокой доступности.
+GiTorch supports both distributing runner containers across multiple Docker hosts and running multiple orchestrator replicas for high availability.
 
-## 1. Пул из нескольких Docker-хостов (Multi-Node)
+## 1. Multi-Node Docker Pool
 
-Если мощностей одного сервера не хватает для параллельных сборок, подключите дополнительные Docker-демоны по TCP или SSH/TLS. GiTorch будет равномерно распределять новые контейнеры раннеров между всеми узлами (Round-Robin) и показывать загрузку каждого узла в веб-панели.
+When a single server cannot handle all concurrent builds, add remote Docker daemons over TCP or TLS. GiTorch distributes new runner containers evenly across all configured nodes (round-robin) and displays per-node load in the dashboard.
 
-### Конфигурация
+### Configuration
 
-Укажите список адресов узлов через `DockerNodes`:
+Specify the list of node endpoints using `DockerNodes`:
 
 ```env
 Orchestrator__DockerNodes__0=unix:///var/run/docker.sock
@@ -17,7 +17,7 @@ Orchestrator__DockerNodes__2=tcp://docker-worker-02.internal:2375
 Orchestrator__MaxConcurrentRunners=12
 ```
 
-Либо в `appsettings.json`:
+Or in `appsettings.json`:
 
 ```json
 {
@@ -32,18 +32,18 @@ Orchestrator__MaxConcurrentRunners=12
 }
 ```
 
-> **Рекомендация:** изолируйте порт удалённого Docker API в частной сети (WireGuard/VPN/внутренний VPC) или используйте TLS-аутентификацию, не открывайте `2375` в публичный интернет.
+> **Recommendation:** keep remote Docker API ports inside a private network (WireGuard/VPN/VPC) or behind mutual TLS; never expose port `2375` to the public internet.
 
-## 2. Несколько реплик оркестратора (High Availability)
+## 2. Multi-Replica High Availability
 
-Для защиты от перезапуска или отказа одного инстанса GiTorch можно запустить две и более реплик за обратным прокси (Nginx, Traefik, HAProxy, Caddy).
+To eliminate downtime during restarts or upgrades, run two or more GiTorch replicas behind a reverse proxy (Nginx, Traefik, HAProxy, or Caddy).
 
-### Требования для HA-кластера
+### HA Requirements
 
-1. **PostgreSQL** (`DatabaseProvider=Postgres`) - хранит общую распределённую очередь задач, защиту от повторной доставки вебхуков и историю сессий, доступную всем репликам.
-2. **Redis** (`RedisConnectionString`) - синхронизирует живые обновления веб-интерфейса между репликами (backplane).
+1. **PostgreSQL** (`DatabaseProvider=Postgres`) — stores the shared distributed job queue, webhook deduplication table, and session history across all replicas.
+2. **Redis** (`RedisConnectionString`) — synchronizes live dashboard updates across replicas.
 
-### Пример переменных окружения для HA
+### Example HA Environment Variables
 
 ```env
 Orchestrator__DatabaseProvider=Postgres
@@ -51,7 +51,7 @@ Orchestrator__PostgresConnectionString=Host=postgres;Port=5432;Database=gitorch;
 Orchestrator__RedisConnectionString=redis:6379
 ```
 
-### Пример `docker-compose.ha.yml`
+### Example `docker-compose.ha.yml`
 
 ```yaml
 services:
@@ -68,7 +68,7 @@ services:
     image: redis:7-alpine
 
   gitorch:
-    image: ghcr.io/<owner>/gitorch:latest
+    image: ghcr.io/grozniyment/gitorch:latest
     deploy:
       replicas: 2
     env_file: .env
@@ -87,5 +87,4 @@ volumes:
   pg_data:
 ```
 
-На балансировщике нагрузки включите поддержку WebSocket и sticky sessions (привязка по cookie или IP) для корректной работы живого обновления панели.
-
+Make sure your reverse proxy enables WebSocket upgrades and sticky sessions (cookie or client IP affinity) for smooth real-time dashboard updates.

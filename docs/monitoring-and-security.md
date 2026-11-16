@@ -1,38 +1,38 @@
-# Мониторинг, веб-панель и безопасность
+# Monitoring, Dashboard & Security
 
-## Веб-панель управления
+## Web Dashboard
 
-Панель доступна в корневом пути `/` и обновляется в реальном времени без перезагрузки страницы:
-- **Системная тема**: автоматически подстраивается под светлую или тёмную тему браузера и ОС, есть переключатель режимов (`system` / `light` / `dark`) в шапке.
-- **Сводка кластера**: занятые и доступные слоты, текущая очередь, среднее время ожидания слота и выполнения задачи, ошибки GitHub API, активные Docker-узлы и профили.
-- **Управление задачами**:
-  - Фильтрация по статусу (`All`, `Active`, `Completed`, `Failed`, `Cancelled`) и быстрый поиск по `#id`, репозиторию, имени раннера, контейнеру или метке (состояние фильтров сохраняется в URL).
-  - Просмотр потоковых логов контейнера (`Logs`) с фильтром только `STDERR`, переключением временных меток, поиском по логам, копированием и скачиванием `.log`.
-  - Аварийная отмена задачи в очереди или принудительная остановка зависшего контейнера (`Kill` / `Cancel`) с подтверждением в строке.
-  - Ручное обновление образа раннеров с реестра (`Pull image`).
+The web dashboard is served at `/` and updates in real time:
+- **Browser theme sync**: automatically follows your OS/browser light or dark theme, with a manual `system` / `light` / `dark` switcher in the header.
+- **Cluster overview**: active/available slots, queued jobs, average slot wait and job duration, GitHub API errors, active Docker nodes, and configured profiles.
+- **Job management**:
+  - Filter by status (`All`, `Active`, `Completed`, `Failed`, `Cancelled`) and search by `#id`, repository, runner name, container ID, or label (filter state is synced with the URL).
+  - Stream live container output via **Logs** with `STDERR` filtering, timestamp toggling, in-log search, clipboard copy, and `.log` download.
+  - Cancel queued jobs or force-kill stuck containers (`Kill` / `Cancel`) with inline confirmation.
+  - Trigger manual runner image updates via **Pull image**.
 
-## Авторизация
+## Authentication
 
-При заданном `Orchestrator__DashboardPassword` панель закрывается авторизацией:
-- Браузеры перенаправляются на страницу входа `/login` и получают подписанную `HttpOnly`-сессию.
-- Для автоматизации и CLI также поддерживается заголовок `Authorization: Basic ...`.
-- Если пароль не задан (пустая строка), панель открыта без авторизации (удобно только для локальной разработки или за закрытым VPN/SSO-прокси).
+When `Orchestrator__DashboardPassword` is set, the dashboard is protected:
+- Browser requests are redirected to `/login` and receive a signed `HttpOnly` session cookie.
+- Automation scripts and `curl` can also authenticate using `Authorization: Basic ...`.
+- Leaving `DashboardPassword` empty disables authentication (recommended only for local testing or behind an authenticating reverse proxy / VPN).
 
-## Prometheus-метрики (`/metrics`) и Healthcheck (`/health`)
+## Prometheus Metrics (`/metrics`) & Health Check (`/health`)
 
-Эндпоинты `/health` и `/metrics` доступны без авторизации панели, чтобы внешние балансировщики и Prometheus могли опрашивать их напрямую.
+Both `/health` and `/metrics` bypass dashboard authentication so load balancers and Prometheus can scrape them directly.
 
-- **`GET /health`** - возвращает `200 OK` (`{"status":"healthy"}`), пока сервис готов принимать запросы.
-- **`GET /metrics`** - отдаёт метрики в формате Prometheus:
-  - `gitorch_queued_jobs` - число задач в очереди или в процессе запуска.
-  - `gitorch_active_runners` - число занятых слотов.
-  - `gitorch_available_slots` - число свободных слотов.
-  - `gitorch_github_api_errors_total` - счётчик ошибок обращений к GitHub API.
-  - `gitorch_slot_wait_seconds` - время ожидания свободного слота (`_sum`, `_count`).
-  - `gitorch_job_duration_seconds` - длительность выполнения задач (`_sum`, `_count`).
-  - `gitorch_job_exits_total{status,exit_code}` - счётчик завершённых задач по итоговому статусу и коду выхода.
+- **`GET /health`** — returns `200 OK` (`{"status":"healthy"}`) when the orchestrator is ready.
+- **`GET /metrics`** — exposes Prometheus-formatted metrics:
+  - `gitorch_queued_jobs` — number of queued or provisioning jobs.
+  - `gitorch_active_runners` — number of currently active runner slots.
+  - `gitorch_available_slots` — number of available runner slots.
+  - `gitorch_github_api_errors_total` — total GitHub API errors.
+  - `gitorch_slot_wait_seconds` — time spent waiting for a runner slot (`_sum`, `_count`).
+  - `gitorch_job_duration_seconds` — duration of executed runner jobs (`_sum`, `_count`).
+  - `gitorch_job_exits_total{status,exit_code}` — completed jobs partitioned by status and exit code.
 
-### Пример конфигурации `prometheus.yml`
+### Example `prometheus.yml`
 
 ```yaml
 scrape_configs:
@@ -42,12 +42,11 @@ scrape_configs:
       - targets: ["gitorch:8080"]
 ```
 
-## Рекомендации по безопасности в продакшене
+## Production Security Best Practices
 
-1. **Закрывайте сервис за HTTPS**: используйте Nginx, Traefik или Caddy с TLS перед GiTorch. Это защитит как передаваемые учётные данные входа в панель, так и входящие вебхуки GitHub.
-2. **Обязательно задайте `GITHUB_WEBHOOK_SECRET` и `DASHBOARD_PASSWORD`**: используйте длинные случайные строки.
-3. **Защитите приватный ключ GitHub App**: монтируйте `private-key.pem` только на чтение (`:ro`) и ограничьте права доступа на хосте (`chmod 600 private-key.pem`).
-4. **Не монтируйте `/var/run/docker.sock` внутрь раннеров для публичных репозиториев**: оставляйте `MountDockerSocket=false` и используйте `UseDinDSidecar=true` для Docker-сборок.
-5. **Ограничьте ресурсы контейнеров**: корректно настройте `MemoryLimitMb`, `CpuLimitCores`, `PidsLimit` и `JobTimeoutMinutes`, чтобы одна тяжёлая задача не исчерпала ресурсы всего сервера.
-6. **Ограничьте доступ к `/metrics`**: если панель доступна извне, закройте порт метрик фаерволом или правилами обратного прокси только для вашей сети мониторинга.
-
+1. **Terminate TLS in front of GiTorch**: use Nginx, Traefik, or Caddy with HTTPS so login credentials and GitHub webhook payloads are encrypted in transit.
+2. **Always set `GITHUB_WEBHOOK_SECRET` and `DASHBOARD_PASSWORD`**: use long, randomly generated secrets.
+3. **Protect the GitHub App private key**: mount `private-key.pem` read-only (`:ro`) and restrict host permissions (`chmod 600 private-key.pem`).
+4. **Never mount `/var/run/docker.sock` for untrusted/public repositories**: keep `MountDockerSocket=false` and use `UseDinDSidecar=true` when Docker builds are needed.
+5. **Enforce container resource limits**: configure `MemoryLimitMb`, `CpuLimitCores`, `PidsLimit`, and `JobTimeoutMinutes` appropriately for your host capacity.
+6. **Restrict `/metrics` access**: if the service is reachable from the public internet, block `/metrics` at your reverse proxy or firewall so only your monitoring network can scrape it.
